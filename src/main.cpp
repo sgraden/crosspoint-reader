@@ -28,8 +28,7 @@
 #include "util/ScreenshotUtil.h"
 
 #include <WiFi.h>
-#include <HTTPClient.h>
-#include <LittleFS.h> // Or SD if the X4 uses an SD card
+#include "network/HttpDownloader.h"
 
 MappedInputManager mappedInputManager(gpio);
 GfxRenderer renderer(display);
@@ -133,20 +132,15 @@ unsigned long t2 = 0;
 // Sync new MTG image
 void syncNewCard() {
     if (WiFi.status() == WL_CONNECTED) {
-        HTTPClient http;
-        http.begin("https://your-mtg-worker.workers.dev/"); 
+        auto err = HttpDownloader::downloadToFile(
+            "https://mtg-slab.sradentest.workers.dev/",
+            "/.sleep/mtg_card.bmp");
         
-        int httpCode = http.GET();
-        if (httpCode == HTTP_CODE_OK) {
-            // Overwrite the specific file the X4 uses for its sleep screen
-            File file = LittleFS.open("/sleep/mtg_card.bmp", FILE_WRITE);
-            if (file) {
-                http.writeToStream(&file);
-                file.close();
-                Serial.println("Slab Updated Seamlessly!");
-            }
+        if (err == HttpDownloader::DownloadError::OK) {
+            Serial.println("Slab Updated Seamlessly!");
+        } else {
+            Serial.println("Slab Update Failed!");
         }
-        http.end();
     }
 }
 

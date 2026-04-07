@@ -70,12 +70,15 @@ void MtgCardViewerActivity::loop() {
     }
 
     if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-      onGoHome();
+      activityManager.popActivity();
     } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       // Toggle Pause
       isPaused = !isPaused;
+      if (!isPaused) {
+        lastSyncTime = millis();
+      }
       requestUpdate();
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
       // Immediate manual pull
       state = ViewerState::CHECK_WIFI;
       requestUpdate();
@@ -133,18 +136,15 @@ void MtgCardViewerActivity::renderCard() const {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, "No MTG Card Synced");
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), isPaused ? "Unpause" : "Pause", "", "Pull Card");
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), isPaused ? tr(STR_UNPAUSE) : tr(STR_PAUSE), "", tr(STR_PULL_CARD));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-
-  if (isPaused) {
-    renderer.drawText(UI_10_FONT_ID, 10, pageHeight - 60, tr(STR_PAUSED));
-  }
 
   renderer.displayBuffer(HalDisplay::FULL_REFRESH);
 }
 
 void MtgCardViewerActivity::checkAndConnectWifi() {
   if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
+    delay(200); // Small delay to avoid race conditions
     state = ViewerState::SYNCING;
     statusMessage = tr(STR_SYNCING);
     requestUpdate();
@@ -163,19 +163,24 @@ void MtgCardViewerActivity::launchWifiSelection() {
 
 void MtgCardViewerActivity::onWifiSelectionComplete(const bool connected) {
   if (connected) {
+    delay(500); // Give stack a moment to stabilize after connection
     state = ViewerState::SYNCING;
     statusMessage = tr(STR_SYNCING);
   } else {
     WiFi.disconnect();
     WiFi.mode(WIFI_OFF);
     state = ViewerState::VIEWING;
+    lastSyncTime = millis(); // Reset interval to avoid immediate loop
   }
   requestUpdate();
 }
 
 void MtgCardViewerActivity::performSync() {
   // Ensure we render the "Syncing..." message before blocking
-  renderIfNeeded();
+  requestUpdateAndWait();
+
+  // Give WiFi stack more time to fully stabilize
+  delay(2000);
 
   Storage.mkdir("/.sleep");
   

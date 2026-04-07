@@ -73,10 +73,10 @@ void MtgSyncActivity::loop() {
     });
 
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      if (selectorIndex == 0) { // Randomize Card
+      if (selectorIndex == 0) { // View Card
+        activityManager.pushActivity(std::make_unique<MtgCardViewerActivity>(renderer, mappedInput));
+      } else if (selectorIndex == 1) { // Pull Card
         checkAndConnectWifi();
-      } else if (selectorIndex == 1) { // View Card
-        activityManager.replaceActivity(std::make_unique<MtgCardViewerActivity>(renderer, mappedInput));
       } else if (selectorIndex == 2) { // Update Interval
         SETTINGS.mtgSyncInterval = (SETTINGS.mtgSyncInterval + 1) % CrossPointSettings::MTG_SYNC_INTERVAL_COUNT;
         SETTINGS.saveToFile();
@@ -91,9 +91,10 @@ void MtgSyncActivity::loop() {
 void MtgSyncActivity::render(RenderLock&&) {
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
+  const auto& metrics = UITheme::getInstance().getMetrics();
 
   renderer.clearScreen();
-  GUI.drawHeader(renderer, Rect{0, 20, pageWidth, 50}, tr(STR_MTG_SYNC));
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_MTG_SYNC));
 
   if (state == SyncState::CHECK_WIFI || state == SyncState::SYNCING) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, statusMessage.c_str());
@@ -104,16 +105,16 @@ void MtgSyncActivity::render(RenderLock&&) {
     
     GUI.drawButtonMenu(
         renderer,
-        Rect{0, 80, pageWidth, pageHeight - 130},
+        Rect{0, 110, pageWidth, pageHeight - 160},
         3, selectorIndex,
         [this, intervalText](int index) -> std::string {
-          if (index == 0) return tr(STR_RANDOMIZE_CARD);
-          if (index == 1) return tr(STR_VIEW_CARD);
+          if (index == 0) return tr(STR_VIEW_CARD);
+          if (index == 1) return tr(STR_PULL_CARD);
           return intervalText;
         },
         [](int index) -> UIIcon {
-          if (index == 0) return Transfer;
-          if (index == 1) return Image;
+          if (index == 0) return Recent;
+          if (index == 1) return Transfer;
           return Settings;
         });
 
@@ -156,7 +157,10 @@ void MtgSyncActivity::onWifiSelectionComplete(const bool connected) {
 
 void MtgSyncActivity::performSync() {
   // Ensure we render the "Syncing..." message before blocking
-  renderIfNeeded();
+  requestUpdateAndWait();
+
+  // Give WiFi stack a moment to fully stabilize
+  delay(1000);
 
   Storage.mkdir("/.sleep");
   

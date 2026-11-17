@@ -4,135 +4,55 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
-#include <WiFi.h>
+#include <Memory.h>
 
-#include "CrossPointSettings.h"
+#include <cmath>
+
 #include "MappedInputManager.h"
-#include "activities/network/WifiSelectionActivity.h"
+#include "MtgPullActivity.h"
+#include "activities/ActivityManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "network/HttpDownloader.h"
-
-namespace {
-// True when any mapped button was released this frame (upstream removed MappedInputManager::wasAnyReleased).
-bool anyButtonReleased(const MappedInputManager& input) {
-  using B = MappedInputManager::Button;
-  return input.wasReleased(B::Back) || input.wasReleased(B::Confirm) || input.wasReleased(B::Left) ||
-         input.wasReleased(B::Right) || input.wasReleased(B::Up) || input.wasReleased(B::Down);
-}
-}  // namespace
-
-MtgCardViewerActivity::MtgCardViewerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : Activity("MtgCardViewer", renderer, mappedInput) {}
-
-unsigned long MtgCardViewerActivity::getIntervalMs() const {
-  switch (SETTINGS.mtgSyncInterval) {
-    case CrossPointSettings::MTG_SYNC_1_MIN: return 60000;
-    case CrossPointSettings::MTG_SYNC_5_MIN: return 300000;
-    case CrossPointSettings::MTG_SYNC_10_MIN: return 600000;
-    case CrossPointSettings::MTG_SYNC_30_MIN: return 1800000;
-    case CrossPointSettings::MTG_SYNC_1_HR: return 3600000;
-    case CrossPointSettings::MTG_SYNC_1_DAY: return 86400000;
-    default: return 0;
-  }
-}
 
 void MtgCardViewerActivity::onEnter() {
   Activity::onEnter();
-  state = ViewerState::VIEWING;
-  lastSyncTime = millis();
   requestUpdate();
 }
 
 void MtgCardViewerActivity::onExit() {
   Activity::onExit();
-  if (WiFi.status() == WL_CONNECTED || WiFi.getMode() != WIFI_MODE_NULL) {
-    WiFi.disconnect();
-    WiFi.mode(WIFI_OFF);
-  }
   renderer.clearScreen();
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }
 
 void MtgCardViewerActivity::loop() {
-  if (state == ViewerState::WIFI_SELECTION) {
-    return;
-  }
-
-  if (state == ViewerState::SYNCING) {
-    performSync();
-    return;
-  }
-
-  if (state == ViewerState::CHECK_WIFI) {
-    checkAndConnectWifi();
-    return;
-  }
-
-  if (state == ViewerState::VIEWING) {
-    // Check interval
-    unsigned long interval = getIntervalMs();
-    if (!isPaused && interval > 0 && (millis() - lastSyncTime >= interval)) {
-      state = ViewerState::CHECK_WIFI;
-      requestUpdate();
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    activityManager.popActivity();
+  } else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+    auto pull = makeUniqueNoThrow<MtgPullActivity>(renderer, mappedInput);
+    if (!pull) {
+      LOG_ERR("MTG", "OOM: card pull");
       return;
     }
-
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-      activityManager.popActivity();
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      // Toggle Pause
-      isPaused = !isPaused;
-      if (!isPaused) {
-        lastSyncTime = millis();
-      }
-      requestUpdate();
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
-      // Immediate manual pull
-      state = ViewerState::CHECK_WIFI;
-      requestUpdate();
-    }
-    return;
-  }
-
-  if (state == ViewerState::MESSAGE) {
-    if (millis() - messageStartTime > 2000 || anyButtonReleased(mappedInput)) {
-      state = ViewerState::VIEWING;
-      requestUpdate();
-    }
-    return;
+    // The viewer is redrawn automatically when the pull finishes, picking up the new BMP.
+    startActivityForResult(std::move(pull), [](const ActivityResult&) {});
   }
 }
 
 void MtgCardViewerActivity::render(RenderLock&&) {
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
-  const auto& metrics = UITheme::getInstance().getMetrics();
 
-  if (state == ViewerState::VIEWING) {
-    renderCard();
-  } else {
-    renderer.clearScreen();
-    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_MTG_SYNC));
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, statusMessage.c_str());
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-  }
-}
-
-void MtgCardViewerActivity::renderCard() const {
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
-
-  HalFile file;
   renderer.clearScreen();
 
-  if (Storage.openFileForRead("BMP", "/.sleep/mtg_card.bmp", file)) {
+  HalFile file;
+  if (Storage.openFileForRead("BMP", MtgPullActivity::CARD_PATH, file)) {
     Bitmap bitmap(file, true);
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
       int x = 0, y = 0;
 
       if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
-        float ratio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
+        const float ratio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
         const float screenRatio = static_cast<float>(pageWidth) / static_cast<float>(pageHeight);
 
         if (ratio > screenRatio) {
@@ -147,84 +67,15 @@ void MtgCardViewerActivity::renderCard() const {
 
       renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, 0, 0);
     } else {
-      renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, "Invalid MTG Card BMP");
+      renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_INVALID_MTG_CARD));
     }
     file.close();
   } else {
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, "No MTG Card Synced");
+    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_NO_MTG_CARD));
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), isPaused ? tr(STR_UNPAUSE) : tr(STR_PAUSE), "", tr(STR_PULL_CARD));
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", tr(STR_PULL_CARD));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer(HalDisplay::FULL_REFRESH);
-}
-
-void MtgCardViewerActivity::checkAndConnectWifi() {
-  if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
-    delay(200); // Small delay to avoid race conditions
-    state = ViewerState::SYNCING;
-    statusMessage = tr(STR_SYNCING);
-    requestUpdate();
-  } else {
-    launchWifiSelection();
-  }
-}
-
-void MtgCardViewerActivity::launchWifiSelection() {
-  state = ViewerState::WIFI_SELECTION;
-  requestUpdate();
-
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
-}
-
-void MtgCardViewerActivity::onWifiSelectionComplete(const bool connected) {
-  if (connected) {
-    delay(500); // Give stack a moment to stabilize after connection
-    state = ViewerState::SYNCING;
-    statusMessage = tr(STR_SYNCING);
-  } else {
-    WiFi.disconnect();
-    WiFi.mode(WIFI_OFF);
-    state = ViewerState::VIEWING;
-    lastSyncTime = millis(); // Reset interval to avoid immediate loop
-  }
-  requestUpdate();
-}
-
-void MtgCardViewerActivity::performSync() {
-  // Ensure we render the "Syncing..." message before blocking
-  requestUpdateAndWait();
-
-  // Give WiFi stack more time to fully stabilize
-  delay(1000);
-
-  Storage.mkdir("/.sleep");
-  
-  // Use cache busting to ensure we get a fresh card
-  char url[128];
-  snprintf(url, sizeof(url), "https://mtg-slab.sradentest.workers.dev/?t=%lu", millis());
-
-  auto err = HttpDownloader::downloadToFile(url, "/.sleep/mtg_card.bmp");
-
-  if (err == HttpDownloader::DownloadError::OK) {
-    statusMessage = tr(STR_SYNC_SUCCESS);
-  } else {
-    statusMessage = tr(STR_SYNC_FAILED);
-    LOG_ERR("MTG", "Sync failed with error: %d", static_cast<int>(err));
-  }
-
-  // Show status message briefly before returning to viewing
-  state = ViewerState::MESSAGE;
-  messageStartTime = millis();
-  lastSyncTime = millis();
-  
-  // Optionally disconnect wifi here if we want to save battery between intervals
-  if (getIntervalMs() == 0 || getIntervalMs() >= 300000) { // If interval >= 5 mins, turn off wifi
-    WiFi.disconnect();
-    WiFi.mode(WIFI_OFF);
-  }
-
-  requestUpdate();
 }

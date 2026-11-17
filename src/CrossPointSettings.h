@@ -149,17 +149,6 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     SLEEP_TIMEOUT_COUNT
   };
 
-  enum MTG_SYNC_INTERVAL {
-    MTG_SYNC_NONE = 0,
-    MTG_SYNC_1_MIN = 1,
-    MTG_SYNC_5_MIN = 2,
-    MTG_SYNC_10_MIN = 3,
-    MTG_SYNC_30_MIN = 4,
-    MTG_SYNC_1_HR = 5,
-    MTG_SYNC_1_DAY = 6,
-    MTG_SYNC_INTERVAL_COUNT = 7
-  };
-
   // E-ink refresh frequency (pages between full refreshes).
   enum REFRESH_FREQUENCY {
     REFRESH_1 = 0,
@@ -435,8 +424,6 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   bleturner::Config ble;
   // Quick Resume: keep current content visible with moon icon instead of showing a static sleep screen.
   uint8_t quickResumeSleepScreen = QUICK_RESUME_NEVER;
-  // MTG Sync interval (MTG_SYNC_INTERVAL enum; runtime only, not persisted)
-  uint8_t mtgSyncInterval = 0;
 
   static constexpr uint8_t MIN_SLEEP_TIMEOUT_MINUTES = 1;
   static constexpr uint8_t SLEEP_TIMEOUT_NEVER_MINUTES = 31;

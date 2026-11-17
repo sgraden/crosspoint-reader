@@ -58,17 +58,21 @@ enum class BmpReaderError : uint8_t {
   BufferTooSmall,
   OomRowBuffer,
   ShortReadRow,
+  OomDitherer,
 };
 
 class Bitmap {
  public:
   static const char* errorToString(BmpReaderError err);
 
-  explicit Bitmap(FsFile& file, bool dithering = false) : file(file), dithering(dithering) {}
+  explicit Bitmap(HalFile& file, bool dithering = false, bool originalThresholds = false)
+      : file(file), dithering(dithering), originalThresholds(originalThresholds) {}
   ~Bitmap();
   BmpReaderError parseHeaders();
   BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer) const;
   BmpReaderError rewindToData() const;
+  // Unprocessed luminance of display-order row y (0 = top); leaves readNextRow()'s dither state alone.
+  BmpReaderError readRowGray(int y, uint8_t* gray, uint8_t* rowBuffer) const;
   int getWidth() const { return width; }
   int getHeight() const { return height; }
   bool isTopDown() const { return topDown; }
@@ -78,11 +82,12 @@ class Bitmap {
   uint16_t getBpp() const { return bpp; }
 
  private:
-  static uint16_t readLE16(FsFile& f);
-  static uint32_t readLE32(FsFile& f);
+  static uint16_t readLE16(HalFile& f);
+  static uint32_t readLE32(HalFile& f);
 
-  FsFile& file;
+  HalFile& file;
   bool dithering = false;
+  bool originalThresholds = false;
   int width = 0;
   int height = 0;
   bool topDown = false;

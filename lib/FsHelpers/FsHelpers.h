@@ -3,10 +3,19 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace FsHelpers {
 
+std::string decodeUriEscapes(const std::string& path);
+
 std::string normalisePath(const std::string& path);
+
+// Numeric-aware, case-insensitive comparison ("2" < "10"). Returns true when str1 orders
+// before str2. Same ordering sortFileList applies within the file/directory groups.
+bool naturalLess(const std::string& str1, const std::string& str2);
+
+void sortFileList(std::vector<std::string>& strs);
 
 /**
  * Check if the given filename ends with the specified extension (case-insensitive).
@@ -30,6 +39,8 @@ inline bool hasPngExtension(const String& fileName) {
 
 // Check for .bmp extension (case-insensitive)
 bool hasBmpExtension(std::string_view fileName);
+
+bool hasImageExtension(std::string_view fileName);
 
 // Check for .gif extension (case-insensitive)
 bool hasGifExtension(std::string_view fileName);
@@ -55,6 +66,32 @@ inline bool hasTxtExtension(const String& fileName) {
 // Check for .md extension (case-insensitive)
 bool hasMarkdownExtension(std::string_view fileName);
 
+bool hasReflowableBookExtension(std::string_view fileName);
+
+// Check for .css extension (case-insensitive)
+bool hasCssExtension(std::string_view fileName);
+inline bool hasCssExtension(const String& fileName) {
+  return hasCssExtension(std::string_view{fileName.c_str(), fileName.length()});
+}
 std::string extractFolderPath(const std::string& filePath);
+std::string getFileNameWithoutExtension(std::string_view filePath);
+inline std::string getFileNameWithoutExtension(const String& filePath) {
+  return getFileNameWithoutExtension(std::string_view{filePath.c_str(), filePath.length()});
+}
+
+// Rejects an empty component, one containing '/' or '\', or the exact components
+// "." and "..", so a single filename/folder-name argument can never be used to
+// escape the directory it is placed into. Names like "volume..2.epub" or
+// "notes...txt" that merely contain ".." are accepted.
+bool isSafePathComponent(std::string_view name);
+inline bool isSafePathComponent(const String& name) {
+  return isSafePathComponent(std::string_view{name.c_str(), name.length()});
+}
+
+/**
+ * Sanitize a filename/path component for FAT32 in a caller-provided buffer.
+ * Replaces invalid path characters, spaces, and control characters with '-'.
+ */
+void sanitizePathComponentForFat32(const char* input, char* output, size_t maxLen);
 
 }  // namespace FsHelpers

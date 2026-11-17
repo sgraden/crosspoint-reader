@@ -10,11 +10,13 @@ class MtgCardViewerActivity final : public Activity {
     VIEWING,
     CHECK_WIFI,
     WIFI_SELECTION,
-    SYNCING
+    SYNCING,
+    MESSAGE
   };
 
   ViewerState state = ViewerState::VIEWING;
   std::string statusMessage;
+  unsigned long messageStartTime = 0;
   
   bool isPaused = false;
   unsigned long lastSyncTime = 0;

@@ -1,10 +1,13 @@
 #pragma once
 
+#include <BufferedFile.h>
 #include <HalStorage.h>
 
 #include <algorithm>
 #include <deque>
+#include <memory>
 #include <string>
+#include <vector>
 
 class BookMetadataCache {
  public:
@@ -18,11 +21,11 @@ class BookMetadataCache {
 
   struct SpineEntry {
     std::string href;
-    size_t cumulativeSize;
+    uint32_t cumulativeSize;
     int16_t tocIndex;
 
     SpineEntry() : cumulativeSize(0), tocIndex(-1) {}
-    SpineEntry(std::string href, const size_t cumulativeSize, const int16_t tocIndex)
+    SpineEntry(std::string href, const uint32_t cumulativeSize, const int16_t tocIndex)
         : href(std::move(href)), cumulativeSize(cumulativeSize), tocIndex(tocIndex) {}
   };
 
@@ -44,25 +47,38 @@ class BookMetadataCache {
 
  private:
   std::string cachePath;
-  size_t lutOffset;
+  uint32_t lutOffset;
   uint16_t spineCount;
   uint16_t tocCount;
   bool loaded;
   bool buildMode;
 
-  FsFile bookFile;
+  HalFile bookFile;
   // Temp file handles during build
-  FsFile spineFile;
-  FsFile tocFile;
+  HalFile spineFile;
+  HalFile tocFile;
+  // Buffers the per-entry tmp-file writes during the OPF/TOC passes: those
+  // writes interleave with zip-inflate SD reads, and unbuffered they thrash
+  // SdFat's shared sector cache (one 512B transaction per 4-byte pod). One
+  // wrapper serves whichever pass is active (spine, then toc).
+  std::unique_ptr<serialization::BufferedFileWriter> passOut;
 
-  // Index for fast href→spineIndex lookup (used only for large EPUBs)
+  // Cumulative spine sizes stay in book.bin; RAM holds every SIZE_WINDOW-th one and one window.
+  static constexpr int SIZE_WINDOW = 32;
+  std::vector<uint32_t> windowStarts;  // total before item w * SIZE_WINDOW
+  uint32_t bookSize = 0;
+  mutable int windowFirst = -1;
+  mutable uint32_t window[SIZE_WINDOW] = {};
+  bool fillWindow(int first) const;  // caller holds sizeWindowLock
+
+  // Index for fast href→spineIndex lookup. Exists only during a large EPUB's
+  // TOC pass; a bare deque member would hold its first node for every open book.
   struct SpineHrefIndexEntry {
     uint64_t hrefHash;  // FNV-1a 64-bit hash
     uint16_t hrefLen;   // length for collision reduction
     int16_t spineIndex;
   };
-  std::deque<SpineHrefIndexEntry> spineHrefIndex;
-  bool useSpineHrefIndex = false;
+  std::unique_ptr<std::deque<SpineHrefIndexEntry>> spineHrefIndex;
 
   static constexpr uint16_t LARGE_SPINE_THRESHOLD = 400;
 
@@ -76,10 +92,10 @@ class BookMetadataCache {
     return hash;
   }
 
-  uint32_t writeSpineEntry(FsFile& file, const SpineEntry& entry) const;
-  uint32_t writeTocEntry(FsFile& file, const TocEntry& entry) const;
-  SpineEntry readSpineEntry(FsFile& file) const;
-  TocEntry readTocEntry(FsFile& file) const;
+  uint32_t writeSpineEntry(HalFile& file, const SpineEntry& entry) const;
+  uint32_t writeTocEntry(HalFile& file, const TocEntry& entry) const;
+  SpineEntry readSpineEntry(HalFile& file) const;
+  TocEntry readTocEntry(HalFile& file) const;
 
  public:
   BookMetadata coreMetadata;
@@ -106,6 +122,11 @@ class BookMetadataCache {
   bool load();
   SpineEntry getSpineEntry(int index);
   TocEntry getTocEntry(int index);
+  // Cumulative byte size up to and including the given spine item (0 if out of range
+  // or not loaded).
+  uint32_t getCumulativeSize(int index) const;
+  // First spine index whose cumulative size reaches `size` (-1 past the end or not loaded). Reads at most one window.
+  int getSpineIndexForSize(uint32_t size) const;
   int getSpineCount() const { return spineCount; }
   int getTocCount() const { return tocCount; }
   bool isLoaded() const { return loaded; }

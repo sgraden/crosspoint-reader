@@ -14,6 +14,15 @@
 #include "network/HttpDownloader.h"
 
 namespace {
+// True when any mapped button was released this frame (upstream removed MappedInputManager::wasAnyReleased).
+bool anyButtonReleased(const MappedInputManager& input) {
+  using B = MappedInputManager::Button;
+  return input.wasReleased(B::Back) || input.wasReleased(B::Confirm) || input.wasReleased(B::Left) ||
+         input.wasReleased(B::Right) || input.wasReleased(B::Up) || input.wasReleased(B::Down);
+}
+}  // namespace
+
+namespace {
 const char* getIntervalString(uint8_t interval) {
   switch (interval) {
     case CrossPointSettings::MTG_SYNC_NONE: return tr(STR_NONE_OPT);
@@ -54,7 +63,7 @@ void MtgSyncActivity::loop() {
   }
 
   if (state == SyncState::SHOW_MESSAGE) {
-    if (millis() - messageStartTime > 2000 || mappedInput.wasAnyReleased()) {
+    if (millis() - messageStartTime > 2000 || anyButtonReleased(mappedInput)) {
       state = SyncState::MENU;
       requestUpdate();
     }
@@ -122,7 +131,11 @@ void MtgSyncActivity::render(RenderLock&&) {
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 
-  renderer.displayBuffer();
+  if (state == SyncState::MENU) {
+    renderer.displayBuffer();
+  } else {
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  }
 }
 
 void MtgSyncActivity::checkAndConnectWifi() {
@@ -164,9 +177,11 @@ void MtgSyncActivity::performSync() {
 
   Storage.mkdir("/.sleep");
   
-  auto err = HttpDownloader::downloadToFile(
-      "https://mtg-slab.sradentest.workers.dev/",
-      "/.sleep/mtg_card.bmp");
+  // Use cache busting to ensure we get a fresh card
+  char url[128];
+  snprintf(url, sizeof(url), "https://mtg-slab.sradentest.workers.dev/?t=%lu", millis());
+
+  auto err = HttpDownloader::downloadToFile(url, "/.sleep/mtg_card.bmp");
 
   if (err == HttpDownloader::DownloadError::OK) {
     statusMessage = tr(STR_SYNC_SUCCESS);

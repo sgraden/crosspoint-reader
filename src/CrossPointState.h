@@ -1,38 +1,36 @@
 #pragma once
+#include <ArduinoJson.h>
+#include <PersistableStore.h>
+
 #include <cstdint>
 #include <string>
 
-class CrossPointState {
-  // Static instance
-  static CrossPointState instance;
+class CrossPointState : public PersistableStore<CrossPointState> {
+  CrossPointState() = default;
+
+  friend class PersistableStore<CrossPointState>;
 
  public:
-  static constexpr uint8_t SLEEP_RECENT_COUNT = 16;
+  static constexpr uint8_t SLEEP_AVOID_REPEAT_LOOKBACK = 5;
 
   std::string openEpubPath;
-  uint16_t recentSleepImages[SLEEP_RECENT_COUNT] = {};  // circular buffer of recent wallpaper indices
-  uint8_t recentSleepPos = 0;                           // next write slot
-  uint8_t recentSleepFill = 0;                          // valid entries (0..SLEEP_RECENT_COUNT)
+  uint32_t sleepLcgCount = 0;
+  uint32_t sleepLcgState = 0;
+  uint32_t sleepOverlayLcgCount = 0;
+  uint32_t sleepOverlayLcgState = 0;
   uint8_t readerActivityLoadCount = 0;
   bool lastSleepFromReader = false;
+  bool showBootScreen = true;
 
-  // Returns true if idx was shown within the last checkCount picks.
-  // Walks backwards from the most recently written slot.
-  bool isRecentSleep(uint16_t idx, uint8_t checkCount) const;
+  static const char* getFilePath() { return "/.crosspoint/state.json"; }
+  void toJson(JsonDocument& doc) const;
+  bool fromJson(JsonVariantConst doc);
 
-  void pushRecentSleep(uint16_t idx);
-  ~CrossPointState() = default;
+  void getSleepLCG(uint32_t& seed, uint32_t& state, uint16_t& indexesLeft, uint16_t& indexesTotal) const;
+  void getSleepOverlayLCG(uint32_t& seed, uint32_t& state, uint16_t& indexesLeft, uint16_t& indexesTotal) const;
 
-  // Get singleton instance
-  static CrossPointState& getInstance() { return instance; }
-
-  bool saveToFile() const;
-
-  bool loadFromFile();
-
- private:
-  bool loadFromBinaryFile();
+  void setSleepLCG(uint32_t seed, uint32_t state, uint16_t indexesLeft, uint16_t indexesTotal);
+  void setSleepOverlayLCG(uint32_t seed, uint32_t state, uint16_t indexesLeft, uint16_t indexesTotal);
 };
 
-// Helper macro to access settings
 #define APP_STATE CrossPointState::getInstance()

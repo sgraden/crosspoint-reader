@@ -33,6 +33,9 @@ class CrossPointWebServerActivity final : public Activity {
   // Network mode
   NetworkMode networkMode = NetworkMode::JOIN_NETWORK;
   bool isApMode = false;
+  // Set when re-entered after the heap-defrag reboot: skip mode selection, go
+  // straight to Join Network, and don't reboot again.
+  bool startInJoinNetwork = false;
 
   // Web server - owned by this activity
   std::unique_ptr<CrossPointWebServer> webServer;
@@ -44,17 +47,29 @@ class CrossPointWebServerActivity final : public Activity {
   // Performance monitoring
   unsigned long lastHandleClientTime = 0;
 
+  // Set when Back or Home is seen while an upload holds handleClient().
+  bool leaveRequested = false;
+
+  // Sustained WiFi-loss tracking; abandon only after WIFI_ABANDON_MS.
+  int consecutiveDisconnects = 0;
+  unsigned long firstDisconnectAt = 0;
+  static constexpr unsigned long WIFI_ABANDON_MS = 5UL * 60UL * 1000UL;
+
+  // Cached signal-strength bracket (0..4) for the WiFi indicator.
+  int lastWifiBars = 0;
+
   void renderServerRunning() const;
+  void renderWifiIndicator(int subHeaderTop) const;
 
   void onNetworkModeSelected(NetworkMode mode);
   void onWifiSelectionComplete(bool connected);
   void startAccessPoint();
   void startWebServer();
-  void stopWebServer();
 
  public:
-  explicit CrossPointWebServerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("CrossPointWebServer", renderer, mappedInput) {}
+  explicit CrossPointWebServerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                       bool startInJoinNetwork = false)
+      : Activity("CrossPointWebServer", renderer, mappedInput), startInJoinNetwork(startInJoinNetwork) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;

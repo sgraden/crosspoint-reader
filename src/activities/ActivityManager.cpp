@@ -24,7 +24,8 @@
 #include "home/HomeActivity.h"
 #include "library/LibraryListActivity.h"
 #include "network/CrossPointWebServerActivity.h"
-#include "network/MtgSyncActivity.h"
+#include "network/MtgCardViewerActivity.h"
+#include "network/MtgPullActivity.h"
 #include "network/UsbDriveActivity.h"
 #include "plugins/PluginCatalogActivity.h"
 #include "reader/ReaderActivity.h"
@@ -321,7 +322,23 @@ void ActivityManager::goToBrowser() {
   }
 }
 
-void ActivityManager::goToMtgSync() { replaceActivity(std::make_unique<MtgSyncActivity>(renderer, mappedInput)); }
+void ActivityManager::goToMtgPull() {
+  auto activity = makeUniqueNoThrow<MtgPullActivity>(renderer, mappedInput, /*standalone=*/true);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: MTG card pull");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
+void ActivityManager::goToMtgCard() {
+  auto activity = makeUniqueNoThrow<MtgCardViewerActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: MTG card viewer");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
 
 void ActivityManager::goToPlugins(bool showOpds) {
   replaceActivity(std::make_unique<PluginCatalogActivity>(renderer, mappedInput, showOpds, /*rootMode=*/true));
@@ -372,7 +389,7 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
       initialMenuItem = HomeMenuItem::OPDS_BROWSER;
     } else if (activityName == "CrossPointWebServer") {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
-    } else if (activityName == "MtgSync") {
+    } else if (activityName == "MtgPull") {
       initialMenuItem = HomeMenuItem::MTG_SYNC;
     } else if (activityName == "Settings" || activityName == "SettingsList") {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;

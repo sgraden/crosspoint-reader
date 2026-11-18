@@ -27,7 +27,7 @@ void MtgCardViewerActivity::onExit() {
 
 void MtgCardViewerActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    activityManager.popActivity();
+    onGoHome(HomeMenuItem::MTG_SYNC);
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
     auto pull = makeUniqueNoThrow<MtgPullActivity>(renderer, mappedInput);
     if (!pull) {

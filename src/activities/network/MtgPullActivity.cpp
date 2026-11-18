@@ -9,7 +9,9 @@
 #include <esp_random.h>
 
 #include "MappedInputManager.h"
+#include "SilentRestart.h"
 #include "WifiCredentialStore.h"
+#include "activities/ActivityManager.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -39,6 +41,14 @@ bool anyButtonReleased(const MappedInputManager& input) {
 
 void MtgPullActivity::onEnter() {
   Activity::onEnter();
+
+  // The credential store is only loaded lazily (WifiSelectionActivity does it in onEnter). Without this, the
+  // first pull after a boot sees no saved networks and always falls through to the picker.
+  {
+    RenderLock lock(*this);  // SD access shares the SPI bus with the display
+    WIFI_STORE.loadFromFile();
+  }
+
   state = State::START;
   retriedConnect = false;
   succeeded = false;
@@ -48,13 +58,18 @@ void MtgPullActivity::onEnter() {
 
 void MtgPullActivity::onExit() {
   Activity::onExit();
-  wifiOff();
-}
 
-void MtgPullActivity::wifiOff() {
+  // Same teardown as the other WiFi activities (CatalogActivity, ClockSyncActivity, ...): reboot instead of
+  // switching the radio off. Bringing WiFi back up later in the same boot is not a path this firmware uses; a
+  // second pull in one boot never associated in testing, while the first one after a boot connected fine.
   if (WiFi.getMode() != WIFI_MODE_NULL) {
-    WiFi.disconnect();
-    WiFi.mode(WIFI_OFF);
+    WiFi.disconnect(false);
+    delay(30);
+    if (succeeded || !standalone) {
+      silentRestartToMtgCard();
+    } else {
+      silentRestart();  // failed or cancelled from Home: back to Home, not to a stale card
+    }
   }
 }
 
@@ -191,11 +206,19 @@ void MtgPullActivity::showMessage(const bool ok) {
   statusMessage = ok ? tr(STR_SYNC_SUCCESS) : tr(STR_SYNC_FAILED);
   state = State::MESSAGE;
   stateStartTime = millis();
-  wifiOff();  // one-shot: the radio is not needed once the download is done
   requestUpdate();
 }
 
 void MtgPullActivity::leave() {
+  if (standalone) {
+    if (succeeded) {
+      activityManager.goToMtgCard();
+    } else {
+      onGoHome(HomeMenuItem::MTG_SYNC);
+    }
+    return;
+  }
+
   ActivityResult result;
   result.isCancelled = !succeeded;
   setResult(std::move(result));
@@ -208,7 +231,7 @@ void MtgPullActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   renderer.clearScreen();
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_MTG_SYNC));
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_PULL_CARD));
   renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, statusMessage);
 
   if (state == State::CONNECTING) {

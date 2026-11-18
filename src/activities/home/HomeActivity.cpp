@@ -253,7 +253,9 @@ void HomeActivity::onEnter() {
   }
 
   const auto base = static_cast<int>(recentBooks.size());
-  selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasLibrarySlot(), hasMtgSlot());
+  selectorIndex = initialMenuItem == HomeMenuItem::NONE
+                      ? 0
+                      : base + menuItemToIndex(initialMenuItem, hasLibrarySlot(), hasMtgSlot());
 
   // Trigger first update
   requestUpdate();
@@ -328,7 +330,7 @@ void HomeActivity::loop() {
         onFileTransferOpen();
         break;
       case HomeMenuItem::MTG_SYNC:
-        activityManager.goToMtgSync();
+        activityManager.goToMtgPull();
         break;
       case HomeMenuItem::SETTINGS_MENU:
         onSettingsOpen();
@@ -541,7 +543,7 @@ void HomeActivity::render(RenderLock&&) {
 
   if (hasMtgSlot()) {
     // Just before Settings (the last entry)
-    menuItems.insert(menuItems.end() - 1, tr(STR_MTG_SYNC));
+    menuItems.insert(menuItems.end() - 1, tr(STR_PULL_CARD));
     menuIcons.insert(menuIcons.end() - 1, Recent);
   }
 
